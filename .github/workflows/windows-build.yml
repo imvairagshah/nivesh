@@ -1,0 +1,41 @@
+name: NiveshDesk Windows .exe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Source zip extract
+        shell: pwsh
+        run: Expand-Archive -Path NiveshDesk-source.zip -DestinationPath extracted
+
+      - name: Flutter SDK (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Dependencies
+        working-directory: extracted/angel_trader
+        run: flutter pub get
+
+      - name: Tests (non-blocking)
+        continue-on-error: true
+        working-directory: extracted/angel_trader
+        run: flutter test
+
+      - name: Windows .exe build
+        working-directory: extracted/angel_trader
+        run: flutter build windows --release
+
+      - name: Artifact upload (download ke liye)
+        uses: actions/upload-artifact@v4
+        with:
+          name: NiveshDesk-Windows
+          path: extracted/angel_trader/build/windows/x64/runner/Release/
