@@ -11,23 +11,27 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Source zip extract (koi bhi naam)
+      - name: Source zip extract + project folder detect
         shell: pwsh
         run: |
-          Write-Host "Repo me files:"
-          Get-ChildItem -Recurse -File | Select-Object -ExpandProperty FullName
           $zip = Get-ChildItem -Path . -Filter *.zip -File -Recurse |
             Where-Object { $_.FullName -notmatch '\\extracted\\' } |
             Select-Object -First 1
-          if (-not $zip) {
-            throw "Repo me koi .zip nahi mila — NiveshDesk-source.zip upload karo (root me)."
-          }
+          if (-not $zip) { throw "Repo me koi .zip nahi mila." }
           Write-Host "Extracting: $($zip.FullName)"
           Expand-Archive -Path $zip.FullName -DestinationPath extracted -Force
-          if (-not (Test-Path 'extracted/angel_trader')) {
-            throw "Zip ke andar 'angel_trader' folder nahi mila — sahi zip upload karo."
-          }
-          Write-Host "OK — extracted/angel_trader ready"
+
+          Get-ChildItem -Path extracted -Directory -Recurse -Filter ephemeral -ErrorAction SilentlyContinue |
+            ForEach-Object { Remove-Item -Recurse -Force $_.FullName -ErrorAction SilentlyContinue }
+
+          $pubspec = Get-ChildItem -Path extracted -Filter pubspec.yaml -File -Recurse |
+            Where-Object { $_.FullName -notmatch '\\\.dart_tool\\' } |
+            Select-Object -First 1
+          if (-not $pubspec) { throw "Zip me pubspec.yaml nahi mila." }
+          $proj = $pubspec.Directory.FullName
+          Write-Host "Project folder: $proj"
+          "PROJ=$proj" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          if (-not (Test-Path "$proj\windows")) { throw "Project me 'windows' folder nahi hai." }
 
       - name: Flutter SDK (stable)
         uses: subosito/flutter-action@v2
@@ -35,21 +39,31 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Flutter version + Windows desktop on
+        shell: pwsh
+        run: |
+          flutter --version
+          flutter config --enable-windows-desktop
+
       - name: Dependencies
-        working-directory: extracted/angel_trader
+        shell: pwsh
+        working-directory: ${{ env.PROJ }}
         run: flutter pub get
 
       - name: Tests (non-blocking)
         continue-on-error: true
-        working-directory: extracted/angel_trader
+        shell: pwsh
+        working-directory: ${{ env.PROJ }}
         run: flutter test
 
       - name: Windows .exe build
-        working-directory: extracted/angel_trader
+        shell: pwsh
+        working-directory: ${{ env.PROJ }}
         run: flutter build windows --release
 
       - name: Artifact upload (download ke liye)
         uses: actions/upload-artifact@v4
         with:
           name: NiveshDesk-Windows
-          path: extracted/angel_trader/build/windows/x64/runner/Release/
+          path: ${{ env.PROJ }}/build/windows/x64/runner/Release/
+          if-no-files-found: error
